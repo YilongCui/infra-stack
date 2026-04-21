@@ -1,0 +1,62 @@
+// Docker container discovery
+discovery.docker "containers" {
+  host = "unix:///var/run/docker.sock"
+  refresh_interval = "5s"
+}
+
+// Relabel discovered containers
+discovery.relabel "docker" {
+  targets = discovery.docker.containers.targets
+
+  // Extract container name (without leading slash)
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/(.*)"
+    target_label  = "container"
+  }
+
+  // Extract image name
+  rule {
+    source_labels = ["__meta_docker_container_image"]
+    target_label  = "image"
+  }
+
+  // Extract service name from container name
+  rule {
+    source_labels = ["__meta_docker_container_name"]
+    regex         = "/([^_]+).*"
+    replacement   = "$1"
+    target_label  = "service"
+  }
+}
+
+// Collect logs from discovered containers
+loki.source.docker "containers" {
+  host             = "unix:///var/run/docker.sock"
+  targets          = discovery.relabel.docker.output
+  forward_to       = [loki.process.pipeline.receiver]
+  refresh_interval = "5s"
+}
+
+// Process logs: extract log level
+loki.process "pipeline" {
+  stage.regex {
+    expression = "(?i).*?(?P<level>error|warn|info|debug).*"
+  }
+
+  stage.labels {
+    values = {
+      level = "",
+    }
+  }
+
+  forward_to = [loki.write.loki.receiver]
+}
+
+// Push logs to Loki
+loki.write "loki" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+    tenant_id = "fake"
+  }
+}

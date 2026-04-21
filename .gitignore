@@ -1,0 +1,9 @@
+.DS_Store
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+
+# Local planning docs (superpowers workflow artifacts)
+docs/superpowers/
