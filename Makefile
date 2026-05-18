@@ -79,8 +79,6 @@ init-prod-env:
 		echo "MONGO_INITDB_ROOT_USERNAME=root"; \
 		echo "MONGO_INITDB_ROOT_PASSWORD=$$(openssl rand -hex 32)"; \
 		echo ""; \
-		echo "REDIS_PASSWORD=$$(openssl rand -hex 32)"; \
-		echo ""; \
 		echo "RABBITMQ_DEFAULT_USER=admin"; \
 		echo "RABBITMQ_DEFAULT_PASS=$$(openssl rand -hex 32)"; \
 		echo ""; \

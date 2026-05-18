@@ -99,18 +99,14 @@ services:
     profiles: ["cache"]
     ports:
       - "127.0.0.1:${REDIS_BIND_PORT:-6379}:6379"
-    environment:
-      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     command:
       - redis-server
       - --appendonly
       - "yes"
-      - --requirepass
-      - ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     volumes:
       - database_redis_data:/data
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep PONG"]
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
       interval: 30s
       timeout: 10s
       retries: 5
