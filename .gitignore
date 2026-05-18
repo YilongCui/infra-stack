@@ -5,5 +5,7 @@
 .idea/
 .vscode/
 
+.env
+
 # Local planning docs (superpowers workflow artifacts)
 docs/superpowers/

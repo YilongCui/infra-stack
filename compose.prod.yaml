@@ -1,0 +1,281 @@
+name: infra-stack-prod
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "100m"
+    max-file: "5"
+
+x-restart-policy: &restart-policy
+  restart: unless-stopped
+
+services:
+  mysql:
+    image: mysql:8.0.45
+    container_name: prod-mysql
+    profiles: ["database"]
+    ports:
+      - "127.0.0.1:${MYSQL_BIND_PORT:-3306}:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD is required}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-authentication-plugin=caching_sha2_password
+    volumes:
+      - database_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$${MYSQL_ROOT_PASSWORD}\" --silent"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    <<: *restart-policy
+    logging: *default-logging
+    networks:
+      - app-network
+
+  postgres:
+    image: postgres:17.9
+    container_name: prod-postgres
+    profiles: ["database"]
+    ports:
+      - "127.0.0.1:${POSTGRES_BIND_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256 --auth-local=scram-sha-256"
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+      - -c
+      - hba_file=/etc/postgresql/pg_hba.conf
+    volumes:
+      - database_postgres_data:/var/lib/postgresql/data
+      - ./database/postgres/postgresql.prod.conf:/etc/postgresql/postgresql.conf:ro
+      - ./database/postgres/pg_hba.prod.conf:/etc/postgresql/pg_hba.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d postgres -h 127.0.0.1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    <<: *restart-policy
+    logging: *default-logging
+    networks:
+      - app-network
+
+  mongo:
+    image: mongo:8.0.20
+    container_name: prod-mongo
+    profiles: ["database"]
+    ports:
+      - "127.0.0.1:${MONGO_BIND_PORT:-27017}:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_INITDB_ROOT_USERNAME:?MONGO_INITDB_ROOT_USERNAME is required}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_INITDB_ROOT_PASSWORD:?MONGO_INITDB_ROOT_PASSWORD is required}
+    command:
+      - mongod
+      - --auth
+      - --bind_ip_all
+    volumes:
+      - database_mongo_data:/data/db
+      - database_mongo_config:/data/configdb
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok' -u \"$${MONGO_INITDB_ROOT_USERNAME}\" -p \"$${MONGO_INITDB_ROOT_PASSWORD}\" --authenticationDatabase admin"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    <<: *restart-policy
+    logging: *default-logging
+    networks:
+      - app-network
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: prod-redis
+    profiles: ["cache"]
+    ports:
+      - "127.0.0.1:${REDIS_BIND_PORT:-6379}:6379"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    volumes:
+      - database_redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$${REDIS_PASSWORD}\" ping | grep PONG"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    <<: *restart-policy
+    logging: *default-logging
+    networks:
+      - app-network
+
+  rabbitmq:
+    image: rabbitmq:4.2.5-management
+    container_name: prod-rabbitmq
+    profiles: ["queue"]
+    ports:
+      - "127.0.0.1:${RABBITMQ_AMQP_BIND_PORT:-5672}:5672"
+      - "127.0.0.1:${RABBITMQ_UI_BIND_PORT:-15672}:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_DEFAULT_USER:?RABBITMQ_DEFAULT_USER is required}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_DEFAULT_PASS:?RABBITMQ_DEFAULT_PASS is required}
+    volumes:
+      - queue_rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    <<: *restart-policy
+    logging: *default-logging
+    networks:
+      - app-network
+
+  minio:
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z
+    container_name: prod-minio
+    profiles: ["storage"]
+    ports:
+      - "127.0.0.1:${MINIO_API_BIND_PORT:-9000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_BIND_PORT:-9001}:9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER is required}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD is required}
+    command: server /data --console-address ":9001"
+    volumes:
+      - storage_minio_data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    <<: *restart-policy
+    logging: *default-logging
+    networks:
+      - app-network
+
+  loki:
+    image: grafana/loki:3.7.1
+    container_name: prod-loki
+    profiles: ["monitoring"]
+    ports:
+      - "127.0.0.1:${LOKI_BIND_PORT:-3100}:3100"
+    command: -config.file=/etc/loki/config.yml
+    volumes:
+      - ./monitoring/loki/config.yml:/etc/loki/config.yml:ro
+      - monitoring_loki_data:/loki
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3100/ready || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    <<: *restart-policy
+    logging: *default-logging
+    networks:
+      - app-network
+
+  alloy:
+    image: grafana/alloy:v1.15.1
+    container_name: prod-alloy
+    profiles: ["monitoring"]
+    command:
+      - run
+      - /etc/alloy/config.alloy
+      - --storage.path=/var/lib/alloy/data
+    volumes:
+      - ./monitoring/alloy/config.alloy:/etc/alloy/config.alloy:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      loki:
+        condition: service_healthy
+    <<: *restart-policy
+    logging: *default-logging
+    networks:
+      - app-network
+
+  grafana:
+    image: grafana/grafana:12.4.0
+    container_name: prod-grafana
+    profiles: ["monitoring"]
+    ports:
+      - "127.0.0.1:${GRAFANA_BIND_PORT:-3000}:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GF_SECURITY_ADMIN_USER:?GF_SECURITY_ADMIN_USER is required}
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD:?GF_SECURITY_ADMIN_PASSWORD is required}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: ${GF_SERVER_ROOT_URL:-}
+    volumes:
+      - monitoring_grafana_data:/var/lib/grafana
+    depends_on:
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:3000/api/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    <<: *restart-policy
+    logging: *default-logging
+    networks:
+      - app-network
+
+  nginx:
+    image: nginx:1.28.0
+    container_name: prod-nginx
+    profiles: ["gateway"]
+    ports:
+      - "${NGINX_HTTP_BIND_PORT:-80}:80"
+      - "${NGINX_HTTPS_BIND_PORT:-443}:443"
+    volumes:
+      - ./gateway/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./gateway/nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./gateway/nginx/certs:/etc/nginx/certs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "nginx -t || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    <<: *restart-policy
+    logging: *default-logging
+    networks:
+      - app-network
+
+volumes:
+  database_mysql_data:
+    external: true
+  database_postgres_data:
+    external: true
+  database_mongo_data:
+    external: true
+  database_mongo_config:
+    external: true
+  database_redis_data:
+    external: true
+  queue_rabbitmq_data:
+    external: true
+  storage_minio_data:
+    external: true
+  monitoring_grafana_data:
+    external: true
+  monitoring_loki_data:
+    external: true
+
+networks:
+  app-network:
+    external: true
