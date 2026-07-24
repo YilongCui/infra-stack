@@ -23,7 +23,7 @@ services:
       - app-network
 
   postgres:
-    image: postgres:17.9
+    image: timescale/timescaledb-ha:pg18.4-ts2.28.3
     container_name: postgres
     profiles: ["database"]
     ports:
@@ -31,14 +31,18 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: okbest
+      PGDATA: /home/postgres/pgdata/data
     command:
       - postgres
       - -c
       - config_file=/etc/postgresql/postgresql.conf
       - -c
       - hba_file=/etc/postgresql/pg_hba.conf
+      - -c
+      - shared_preload_libraries=timescaledb
     volumes:
-      - database_postgres_data:/var/lib/postgresql/data
+      - database_postgres18_data:/home/postgres/pgdata/data
       - ./database/postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
       - ./database/postgres/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
     restart: unless-stopped
@@ -183,20 +187,32 @@ services:
 volumes:
   database_mysql_data:
     external: true
+
+  # Retained for PostgreSQL 17 rollback. Do not mount into PostgreSQL 18.
   database_postgres_data:
     external: true
+
+  database_postgres18_data:
+    external: true
+
   database_mongo_data:
     external: true
+
   database_mongo_config:
     external: true
+
   database_redis_data:
     external: true
+
   queue_rabbitmq_data:
     external: true
+
   storage_minio_data:
     external: true
+
   monitoring_grafana_data:
     external: true
+
   monitoring_loki_data:
     external: true
 
